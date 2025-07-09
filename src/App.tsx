@@ -1,74 +1,69 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  TrendingUp,
-  BarChart3,
-  Star,
-  List,
-  Wifi,
-  Settings,
-  ExternalLink,
-  Brain,
-  RefreshCw,
-  Clock,
-  WifiOff,
-  Activity,
+import React, { useState, useEffect } from 'react';
+import { 
+  BarChart3, 
+  Settings, 
+  List, 
+  Heart, 
+  Activity, 
+  TrendingUp, 
+  DollarSign,
+  Calculator,
   Zap,
-  Heart,
-  HeartOff
+  Clock,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  AlertTriangle,
+  Target,
+  BookOpen,
+  Globe
 } from 'lucide-react';
-import ChartSelector from './components/ChartSelector';
+
+// Components
+import AlertsList from './components/AlertsList';
 import WatchlistModal from './components/WatchlistModal';
 import FavoritesModal from './components/FavoritesModal';
-import StreamDataModal from './components/StreamDataModal';
 import SettingsModal from './components/SettingsModal';
-import { TimeZoneProvider } from './contexts/TimeZoneContext';
+import StreamDataModal from './components/StreamDataModal';
+import ChartSelector from './components/ChartSelector';
+import SmartMoneyChartModal from './components/SmartMoneyChartModal';
+import PaperTradesModal from './components/PaperTradesModal';
+import RealTradesModal from './components/RealTradesModal';
+import TimeZoneToggle from './components/TimeZoneToggle';
+
+// Contexts
+import { useTimeZone } from './contexts/TimeZoneContext';
 import { formatTime } from './utils/timeUtils';
+
+interface Stats {
+  pairs_count: number;
+  total_candles: number;
+  alerts_count: number;
+  last_update: string;
+  volume_alerts: number;
+  consecutive_alerts: number;
+  priority_alerts: number;
+  smart_money_alerts: number;
+  paper_trades_count: number;
+  real_trades_count: number;
+  paper_trades_pnl: number;
+  real_trades_pnl: number;
+}
 
 interface Alert {
   id: number;
   symbol: string;
   alert_type: string;
   price: number;
-  volume_ratio?: number;
-  consecutive_count?: number;
-  current_volume_usdt?: number;
-  average_volume_usdt?: number;
-  is_true_signal?: boolean;
-  is_closed: boolean;
+  timestamp: number | string;
+  close_timestamp?: number | string;
+  preliminary_alert?: Alert;
   has_imbalance?: boolean;
   imbalance_data?: any;
-  message: string;
-  timestamp: string;
-  close_timestamp?: string;
   candle_data?: any;
-  preliminary_alert?: Alert;
   order_book_snapshot?: any;
-}
-
-interface WatchlistItem {
-  id: number;
-  symbol: string;
-  is_active: boolean;
-  is_favorite: boolean;
-  price_drop_percentage?: number;
-  current_price?: number;
-  historical_price?: number;
-  created_at: string;
-  updated_at: string;
-  notes?: string;
-  color?: string;
-  sort_order?: number;
-  favorite_added_at?: string;
-}
-
-interface StreamData {
-  symbol: string;
-  price: number;
-  volume: number;
-  volume_usdt: number;
-  is_long: boolean;
-  timestamp: string;
-  is_closed?: boolean;
+  volume_ratio?: number;
+  consecutive_count?: number;
 }
 
 interface SmartMoneyAlert {
@@ -84,584 +79,269 @@ interface SmartMoneyAlert {
   related_alert_id?: number;
 }
 
+interface WatchlistItem {
+  id: number;
+  symbol: string;
+  is_active: boolean;
+  is_favorite: boolean;
+  price_drop_percentage?: number;
+  current_price?: number;
+  historical_price?: number;
+  created_at: string;
+  updated_at: string;
+  notes?: string;
+  color?: string;
+}
+
+interface FavoriteItem {
+  id: number;
+  symbol: string;
+  is_active: boolean;
+  price_drop_percentage?: number;
+  current_price?: number;
+  historical_price?: number;
+  notes?: string;
+  color?: string;
+  sort_order?: number;
+  favorite_added_at?: string;
+}
+
+interface StreamData {
+  symbol: string;
+  price: number;
+  volume: number;
+  volume_usdt: number;
+  is_long: boolean;
+  timestamp: string;
+  change_24h?: number;
+}
+
 interface TimeSync {
   is_synced: boolean;
-  last_sync?: string;
+  last_sync: string | null;
   time_offset_ms: number;
   exchange_time: string;
   local_time: string;
-  sync_age_seconds?: number;
-  serverTime?: number;
-}
-
-interface Settings {
-  volume_analyzer: {
-    analysis_hours: number;
-    volume_multiplier: number;
-    min_volume_usdt: number;
-    consecutive_long_count: number;
-    alert_grouping_minutes: number;
-    data_retention_hours: number;
-    update_interval_seconds: number;
-    notification_enabled: boolean;
-  };
-  alerts: {
-    volume_alerts_enabled: boolean;
-    consecutive_alerts_enabled: boolean;
-    priority_alerts_enabled: boolean;
-  };
-  imbalance: {
-    fair_value_gap_enabled: boolean;
-    order_block_enabled: boolean;
-    breaker_block_enabled: boolean;
-    min_gap_percentage: number;
-    min_strength: number;
-  };
-  orderbook: {
-    enabled: boolean;
-    snapshot_on_alert: boolean;
-  };
-  telegram: {
-    enabled: boolean;
-  };
-  time_sync?: TimeSync;
+  sync_age_seconds: number | null;
+  serverTime: number;
+  status: string;
 }
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'volume' | 'consecutive' | 'priority' | 'watchlist' | 'favorites' | 'stream' | 'smart_money'>('volume');
-  const [volumeAlerts, setVolumeAlerts] = useState<Alert[]>([]);
-  const [consecutiveAlerts, setConsecutiveAlerts] = useState<Alert[]>([]);
-  const [priorityAlerts, setPriorityAlerts] = useState<Alert[]>([]);
+  // State management
+  const [activeTab, setActiveTab] = useState<'volume' | 'consecutive' | 'priority' | 'smart_money' | 'paper_trades' | 'real_trades'>('volume');
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [smartMoneyAlerts, setSmartMoneyAlerts] = useState<SmartMoneyAlert[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
-  const [favorites, setFavorites] = useState<WatchlistItem[]>([]);
+  const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
   const [streamData, setStreamData] = useState<StreamData[]>([]);
+  const [timeSync, setTimeSync] = useState<TimeSync | null>(null);
+  
+  // Modal states
+  const [showWatchlist, setShowWatchlist] = useState(false);
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showStreamData, setShowStreamData] = useState(false);
+  const [showPaperTrades, setShowPaperTrades] = useState(false);
+  const [showRealTrades, setShowRealTrades] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [selectedSmartMoneyAlert, setSelectedSmartMoneyAlert] = useState<SmartMoneyAlert | null>(null);
-  const [showWatchlistModal, setShowWatchlistModal] = useState(false);
-  const [showFavoritesModal, setShowFavoritesModal] = useState(false);
-  const [showStreamModal, setShowStreamModal] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
-  const [settings, setSettings] = useState<Settings | null>(null);
+
+  // Connection states
   const [loading, setLoading] = useState(true);
-  const [currentTime, setCurrentTime] = useState<Date>(new Date());
-  const [timeSync, setTimeSync] = useState<TimeSync | null>(null);
-  const [lastDataUpdate, setLastDataUpdate] = useState<Date | null>(null);
-  const [reconnectAttempts, setReconnectAttempts] = useState(0);
-  const [dataActivity, setDataActivity] = useState<'active' | 'idle' | 'error'>('idle');
-  const [connectionInfo, setConnectionInfo] = useState<{
-    subscribedCount: number;
-    failedCount: number;
-    subscribedPairs: string[];
-  }>({ subscribedCount: 0, failedCount: 0, subscribedPairs: [] });
+  const [error, setError] = useState<string | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [wsConnectionStatus, setWsConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
 
-  // Refs для WebSocket и интервалов
-  const wsRef = useRef<WebSocket | null>(null);
-  const timeIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const dataRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const activityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const { timeZone } = useTimeZone();
 
+  // WebSocket connection
   useEffect(() => {
-    loadInitialData();
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout;
+
+    const connectWebSocket = () => {
+      try {
+        setWsConnectionStatus('connecting');
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          console.log('✅ WebSocket connected');
+          setWsConnected(true);
+          setWsConnectionStatus('connected');
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            switch (data.type) {
+              case 'stats':
+                setStats(data.data);
+                break;
+              case 'alert':
+                if (data.data.alert_type === 'smart_money') {
+                  setSmartMoneyAlerts(prev => [data.data, ...prev.slice(0, 99)]);
+                } else {
+                  setAlerts(prev => [data.data, ...prev.slice(0, 99)]);
+                }
+                break;
+              case 'stream_data':
+                setStreamData(prev => [data.data, ...prev.slice(0, 49)]);
+                break;
+              case 'time_sync':
+                setTimeSync(data.data);
+                break;
+              default:
+                console.log('Unknown WebSocket message type:', data.type);
+            }
+          } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
+          }
+        };
+
+        ws.onclose = () => {
+          console.log('❌ WebSocket disconnected');
+          setWsConnected(false);
+          setWsConnectionStatus('disconnected');
+          
+          // Reconnect after 3 seconds
+          reconnectTimeout = setTimeout(connectWebSocket, 3000);
+        };
+
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          setWsConnected(false);
+          setWsConnectionStatus('disconnected');
+        };
+
+      } catch (error) {
+        console.error('Failed to connect WebSocket:', error);
+        setWsConnectionStatus('disconnected');
+        reconnectTimeout = setTimeout(connectWebSocket, 5000);
+      }
+    };
+
     connectWebSocket();
-    requestNotificationPermission();
 
-    // Обновляем время каждую секунду
-    timeIntervalRef.current = setInterval(() => {
-      updateCurrentTime();
-    }, 1000);
-
-    // Загружаем информацию о синхронизации времени каждые 30 секунд
-    syncIntervalRef.current = setInterval(loadTimeSync, 30000);
-    loadTimeSync();
-
-    // Периодически обновляем данные (каждые 30 секунд)
-    dataRefreshIntervalRef.current = setInterval(() => {
-      refreshData();
-    }, 30000);
-
-    // Cleanup function
     return () => {
-      if (timeIntervalRef.current) {
-        clearInterval(timeIntervalRef.current);
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
       }
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
-      if (dataRefreshIntervalRef.current) {
-        clearInterval(dataRefreshIntervalRef.current);
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (activityTimeoutRef.current) {
-        clearTimeout(activityTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
+      if (ws) {
+        ws.close();
       }
     };
   }, []);
 
-  const updateCurrentTime = () => {
-    setCurrentTime(new Date());
-  };
-
-  const updateDataActivity = (status: 'active' | 'idle' | 'error') => {
-    setDataActivity(status);
-
-    // Сбрасываем таймер активности
-    if (activityTimeoutRef.current) {
-      clearTimeout(activityTimeoutRef.current);
-    }
-
-    // Если статус активный, через 3 секунды переводим в idle
-    if (status === 'active') {
-      activityTimeoutRef.current = setTimeout(() => {
-        setDataActivity('idle');
-      }, 3000);
-    }
-  };
-
-  const loadTimeSync = async () => {
-    try {
-      const response = await fetch('/api/time');
-      if (response.ok) {
-        const timeSyncData = await response.json();
-        setTimeSync(timeSyncData);
-      }
-    } catch (error) {
-      console.error('Ошибка загрузки информации о времени:', error);
-    }
-  };
-
-  const refreshData = async () => {
-    try {
-      updateDataActivity('active');
-
-      // Обновляем алерты
-      const alertsResponse = await fetch('/api/alerts/all');
-      if (alertsResponse.ok) {
-        const alertsData = await alertsResponse.json();
-
-        // Обновляем алерты с сортировкой
-        setVolumeAlerts((alertsData.volume_alerts || []).sort((a: Alert, b: Alert) =>
-          new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-        ));
-        setConsecutiveAlerts((alertsData.consecutive_alerts || []).sort((a: Alert, b: Alert) =>
-          new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-        ));
-        setPriorityAlerts((alertsData.priority_alerts || []).sort((a: Alert, b: Alert) =>
-          new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-        ));
-
-        console.log('Данные обновлены:', {
-          volume: alertsData.volume_alerts?.length || 0,
-          consecutive: alertsData.consecutive_alerts?.length || 0,
-          priority: alertsData.priority_alerts?.length || 0
-        });
-      }
-
-      // Обновляем watchlist
-      const watchlistResponse = await fetch('/api/watchlist');
-      if (watchlistResponse.ok) {
-        const watchlistData = await watchlistResponse.json();
-        const sortedWatchlist = (watchlistData.pairs || []).sort((a: WatchlistItem, b: WatchlistItem) => {
-          // Сначала избранные
-          if (a.is_favorite && !b.is_favorite) return -1;
-          if (!a.is_favorite && b.is_favorite) return 1;
-
-          // Затем по проценту падения
-          if (a.price_drop_percentage && b.price_drop_percentage) {
-            if (a.price_drop_percentage !== b.price_drop_percentage) {
-              return b.price_drop_percentage - a.price_drop_percentage;
-            }
-          }
-          return a.symbol.localeCompare(b.symbol);
-        });
-        setWatchlist(sortedWatchlist);
-      }
-
-      // Обновляем избранное
-      const favoritesResponse = await fetch('/api/favorites');
-      if (favoritesResponse.ok) {
-        const favoritesData = await favoritesResponse.json();
-        setFavorites(favoritesData.favorites || []);
-      }
-
-    } catch (error) {
-      console.error('Ошибка обновления данных:', error);
-      updateDataActivity('error');
-    }
-  };
-
-  const requestNotificationPermission = async () => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      await Notification.requestPermission();
-    }
-  };
-
-  const showNotification = (alert: Alert) => {
-    if (!settings?.volume_analyzer?.notification_enabled) return;
-    if ('Notification' in window && Notification.permission === 'granted') {
-      const title = `Алерт: ${alert.symbol}`;
-      const body = alert.message;
-      const notification = new Notification(title, {
-        body,
-        icon: '/favicon.ico',
-        tag: `alert-${alert.id}`
-      });
-
-      notification.onclick = () => {
-        window.focus();
-        setSelectedAlert(alert);
-        notification.close();
-      };
-
-      setTimeout(() => notification.close(), 10000);
-    }
-  };
+  // Load initial data
+  useEffect(() => {
+    loadInitialData();
+    
+    // Refresh data every 30 seconds
+    const interval = setInterval(loadInitialData, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const loadInitialData = async () => {
     try {
       setLoading(true);
-      updateDataActivity('active');
+      setError(null);
 
-      // Загружаем алерты
-      const alertsResponse = await fetch('/api/alerts/all');
+      // Load all data in parallel
+      const [
+        statsResponse,
+        alertsResponse,
+        smartMoneyResponse,
+        watchlistResponse,
+        favoritesResponse,
+        timeSyncResponse
+      ] = await Promise.all([
+        fetch('/api/stats'),
+        fetch('/api/alerts/all'),
+        fetch('/api/alerts/smart-money'),
+        fetch('/api/watchlist'),
+        fetch('/api/favorites'),
+        fetch('/api/time')
+      ]);
+
+      // Process stats
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json();
+        setStats(statsData);
+      }
+
+      // Process alerts
       if (alertsResponse.ok) {
         const alertsData = await alertsResponse.json();
-        // Сортируем по времени закрытия (новые сверху)
-        setVolumeAlerts((alertsData.volume_alerts || []).sort((a: Alert, b: Alert) =>
-          new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-        ));
-        setConsecutiveAlerts((alertsData.consecutive_alerts || []).sort((a: Alert, b: Alert) =>
-          new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-        ));
-        setPriorityAlerts((alertsData.priority_alerts || []).sort((a: Alert, b: Alert) =>
-          new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-        ));
-
-        console.log('Алерты загружены:', {
-          volume: alertsData.volume_alerts?.length || 0,
-          consecutive: alertsData.consecutive_alerts?.length || 0,
-          priority: alertsData.priority_alerts?.length || 0
+        const allAlerts = [
+          ...(alertsData.volume_alerts || []),
+          ...(alertsData.consecutive_alerts || []),
+          ...(alertsData.priority_alerts || [])
+        ];
+        
+        // Sort by timestamp (newest first)
+        allAlerts.sort((a, b) => {
+          const timeA = typeof a.timestamp === 'number' ? a.timestamp : new Date(a.timestamp).getTime();
+          const timeB = typeof b.timestamp === 'number' ? b.timestamp : new Date(b.timestamp).getTime();
+          return timeB - timeA;
         });
+        
+        setAlerts(allAlerts);
       }
 
-      // Загружаем watchlist
-      const watchlistResponse = await fetch('/api/watchlist');
+      // Process Smart Money alerts
+      if (smartMoneyResponse.ok) {
+        const smartMoneyData = await smartMoneyResponse.json();
+        setSmartMoneyAlerts(smartMoneyData.alerts || []);
+      }
+
+      // Process watchlist
       if (watchlistResponse.ok) {
         const watchlistData = await watchlistResponse.json();
-        // Сортируем по избранному, затем по проценту падения и алфавиту
-        const sortedWatchlist = (watchlistData.pairs || []).sort((a: WatchlistItem, b: WatchlistItem) => {
-          // Сначала избранные
-          if (a.is_favorite && !b.is_favorite) return -1;
-          if (!a.is_favorite && b.is_favorite) return 1;
-
-          // Затем по проценту падения
-          if (a.price_drop_percentage && b.price_drop_percentage) {
-            if (a.price_drop_percentage !== b.price_drop_percentage) {
-              return b.price_drop_percentage - a.price_drop_percentage;
-            }
-          }
-          return a.symbol.localeCompare(b.symbol);
-        });
-        setWatchlist(sortedWatchlist);
+        setWatchlist(watchlistData.watchlist || []);
       }
 
-      // Загружаем избранное
-      const favoritesResponse = await fetch('/api/favorites');
+      // Process favorites
       if (favoritesResponse.ok) {
         const favoritesData = await favoritesResponse.json();
         setFavorites(favoritesData.favorites || []);
       }
 
-      // Загружаем настройки
-      const settingsResponse = await fetch('/api/settings');
-      if (settingsResponse.ok) {
-        const settingsData = await settingsResponse.json();
-        setSettings(settingsData);
-        if (settingsData.time_sync) {
-          setTimeSync(settingsData.time_sync);
-        }
+      // Process time sync
+      if (timeSyncResponse.ok) {
+        const timeSyncData = await timeSyncResponse.json();
+        setTimeSync(timeSyncData);
       }
 
     } catch (error) {
-      console.error('Ошибка загрузки данных:', error);
-      updateDataActivity('error');
+      console.error('Error loading initial data:', error);
+      setError('Ошибка загрузки данных');
     } finally {
       setLoading(false);
     }
   };
 
-  const connectWebSocket = () => {
-    // Закрываем существующее соединение, если есть
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-    console.log('🔗 Подключение к WebSocket:', wsUrl);
-    setConnectionStatus('connecting');
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setConnectionStatus('connected');
-      setReconnectAttempts(0);
-      updateDataActivity('active');
-      console.log('✅ WebSocket подключен');
-
-      // Отправляем ping для поддержания соединения
-      const pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }));
-        } else {
-          clearInterval(pingInterval);
-        }
-      }, 30000); // Ping каждые 30 секунд
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setLastDataUpdate(new Date());
-        updateDataActivity('active');
-        handleWebSocketMessage(data);
-      } catch (error) {
-        console.error('Ошибка парсинга WebSocket сообщения:', error);
-        updateDataActivity('error');
-      }
-    };
-
-    ws.onclose = (event) => {
-      console.log('❌ WebSocket отключен:', event.code, event.reason);
-      setConnectionStatus('disconnected');
-      updateDataActivity('error');
-
-      // Автоматическое переподключение с экспоненциальной задержкой
-      if (wsRef.current === ws) { // Проверяем, что это текущее соединение
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Максимум 30 секунд
-        console.log(`🔄 Переподключение через ${delay}мс (попытка ${reconnectAttempts + 1})`);
-
-        reconnectTimeoutRef.current = setTimeout(() => {
-          setReconnectAttempts(prev => prev + 1);
-          connectWebSocket();
-        }, delay);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('❌ WebSocket ошибка:', error);
-      setConnectionStatus('disconnected');
-      updateDataActivity('error');
-    };
-  };
-
-  const handleWebSocketMessage = (data: any) => {
-    switch (data.type) {
-      case 'pong':
-        // Ответ на ping - ничего не делаем
-        break;
-
-      case 'new_alert':
-      case 'alert_updated':
-        const alert = data.alert;
-
-        // Показываем уведомление только для новых алертов
-        if (data.type === 'new_alert') {
-          showNotification(alert);
-        }
-
-        // Обновляем алерты без дублирования
-        if (alert.alert_type === 'volume_spike') {
-          setVolumeAlerts(prev => {
-            const existing = prev.find(a => a.id === alert.id);
-            if (existing) {
-              // Обновляем существующий алерт
-              const updated = prev.map(a => a.id === alert.id ? alert : a);
-              return updated.sort((a, b) =>
-                new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-              );
-            }
-            // Добавляем новый алерт
-            const newList = [alert, ...prev].slice(0, 100);
-            return newList.sort((a, b) =>
-              new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-            );
-          });
-        } else if (alert.alert_type === 'consecutive_long') {
-          setConsecutiveAlerts(prev => {
-            const existing = prev.find(a => a.id === alert.id);
-            if (existing) {
-              const updated = prev.map(a => a.id === alert.id ? alert : a);
-              return updated.sort((a, b) =>
-                new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-              );
-            }
-            const newList = [alert, ...prev].slice(0, 100);
-            return newList.sort((a, b) =>
-              new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-            );
-          });
-        } else if (alert.alert_type === 'priority') {
-          setPriorityAlerts(prev => {
-            const existing = prev.find(a => a.id === alert.id);
-            if (existing) {
-              const updated = prev.map(a => a.id === alert.id ? alert : a);
-              return updated.sort((a, b) =>
-                new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-              );
-            }
-            const newList = [alert, ...prev].slice(0, 100);
-            return newList.sort((a, b) =>
-              new Date(b.close_timestamp || b.timestamp).getTime() - new Date(a.close_timestamp || a.timestamp).getTime()
-            );
-          });
-        }
-
-        // Если есть имбаланс, добавляем в Smart Money алерты
-        if (alert.has_imbalance && alert.imbalance_data) {
-          const smartMoneyAlert: SmartMoneyAlert = {
-            id: Date.now(),
-            symbol: alert.symbol,
-            type: alert.imbalance_data.type,
-            direction: alert.imbalance_data.direction,
-            strength: alert.imbalance_data.strength,
-            price: alert.price,
-            timestamp: alert.timestamp,
-            top: alert.imbalance_data.top,
-            bottom: alert.imbalance_data.bottom,
-            related_alert_id: alert.id
-          };
-          setSmartMoneyAlerts(prev => [smartMoneyAlert, ...prev].slice(0, 50));
-        }
-        break;
-
-      case 'kline_update':
-        // Обновляем потоковые данные для ВСЕХ символов
-        const streamItem: StreamData = {
-          symbol: data.symbol,
-          price: parseFloat(data.data.close),
-          volume: parseFloat(data.data.volume),
-          volume_usdt: parseFloat(data.data.volume) * parseFloat(data.data.close),
-          is_long: parseFloat(data.data.close) > parseFloat(data.data.open),
-          timestamp: data.timestamp,
-          is_closed: data.is_closed || false
-        };
-
-        setStreamData(prev => {
-          // Обновляем или добавляем данные для символа
-          const filtered = prev.filter(item => item.symbol !== data.symbol);
-          const newData = [streamItem, ...filtered].slice(0, 2000); // Увеличиваем лимит до 2000
-          return newData;
-        });
-        break;
-
-      case 'connection_status':
-        setConnectionStatus(data.status === 'connected' ? 'connected' : 'disconnected');
-
-        // Обновляем информацию о подключении
-        if (data.subscribed_count !== undefined) {
-          setConnectionInfo({
-            subscribedCount: data.subscribed_count || 0,
-            failedCount: data.failed_count || 0,
-            subscribedPairs: data.subscribed_pairs || []
-          });
-        }
-
-        console.log('📊 Статус подключения:', {
-          status: data.status,
-          subscribedCount: data.subscribed_count,
-          failedCount: data.failed_count,
-          totalPairs: data.pairs_count
-        });
-        break;
-
-      case 'watchlist_updated':
-      case 'favorites_updated':
-        // Обновляем watchlist и избранное при изменениях
-        refreshData();
-        break;
-
-      case 'consecutive_update':
-        // Обновление счетчика последовательных свечей
-        console.log(`Обновление последовательности для ${data.symbol}: ${data.count} свечей`);
-        break;
-
-      case 'alerts_cleared':
-        // Очистка алертов
-        if (data.alert_type === 'volume_spike') {
-          setVolumeAlerts([]);
-        } else if (data.alert_type === 'consecutive_long') {
-          setConsecutiveAlerts([]);
-        } else if (data.alert_type === 'priority') {
-          setPriorityAlerts([]);
-        }
-        break;
-
-      default:
-        console.log('❓ Неизвестный тип сообщения WebSocket:', data.type);
-    }
-  };
-
-  const loadWatchlist = async () => {
-    try {
-      const response = await fetch('/api/watchlist');
-      if (response.ok) {
-        const data = await response.json();
-        // Сортируем по избранному, проценту падения и алфавиту
-        const sortedWatchlist = (data.pairs || []).sort((a: WatchlistItem, b: WatchlistItem) => {
-          // Сначала избранные
-          if (a.is_favorite && !b.is_favorite) return -1;
-          if (!a.is_favorite && b.is_favorite) return 1;
-
-          // Затем по проценту падения
-          if (a.price_drop_percentage && b.price_drop_percentage) {
-            if (a.price_drop_percentage !== b.price_drop_percentage) {
-              return b.price_drop_percentage - a.price_drop_percentage;
-            }
-          }
-          return a.symbol.localeCompare(b.symbol);
-        });
-        setWatchlist(sortedWatchlist);
-      }
-    } catch (error) {
-      console.error('Ошибка загрузки watchlist:', error);
-    }
-  };
-
-  const loadFavorites = async () => {
-    try {
-      const response = await fetch('/api/favorites');
-      if (response.ok) {
-        const data = await response.json();
-        setFavorites(data.favorites || []);
-      }
-    } catch (error) {
-      console.error('Ошибка загрузки избранного:', error);
-    }
-  };
-
-  const toggleFavorite = async (symbol: string, isFavorite: boolean) => {
+  const handleToggleFavorite = async (symbol: string, isFavorite: boolean) => {
     try {
       if (isFavorite) {
-        // Удаляем из избранного
+        // Remove from favorites
         const response = await fetch(`/api/favorites/${symbol}`, {
           method: 'DELETE'
         });
+        
         if (response.ok) {
-          await refreshData();
+          setFavorites(prev => prev.filter(f => f.symbol !== symbol));
+          setWatchlist(prev => prev.map(w => 
+            w.symbol === symbol ? { ...w, is_favorite: false } : w
+          ));
         }
       } else {
-        // Добавляем в избранное
+        // Add to favorites
         const response = await fetch('/api/favorites', {
           method: 'POST',
           headers: {
@@ -669,849 +349,444 @@ const App: React.FC = () => {
           },
           body: JSON.stringify({ symbol }),
         });
+        
         if (response.ok) {
-          await refreshData();
+          const newFavorite = await response.json();
+          setFavorites(prev => [newFavorite, ...prev]);
+          setWatchlist(prev => prev.map(w => 
+            w.symbol === symbol ? { ...w, is_favorite: true } : w
+          ));
         }
       }
     } catch (error) {
-      console.error('Ошибка переключения избранного:', error);
+      console.error('Error toggling favorite:', error);
+      throw error;
     }
   };
 
-  const clearAlerts = async (alertType: string) => {
-    try {
-      const response = await fetch(`/api/alerts/clear/${alertType}`, {
-        method: 'DELETE'
-      });
-
-      if (response.ok) {
-        if (alertType === 'volume_spike') {
-          setVolumeAlerts([]);
-        } else if (alertType === 'consecutive_long') {
-          setConsecutiveAlerts([]);
-        } else if (alertType === 'priority') {
-          setPriorityAlerts([]);
-        }
-      }
-    } catch (error) {
-      console.error('Ошибка очистки алертов:', error);
-    }
-  };
-
-  const openTradingView = (symbol: string) => {
-    const cleanSymbol = symbol.replace('USDT', '');
-    const url = `https://www.tradingview.com/chart/?symbol=BYBIT:${cleanSymbol}USDT.P&interval=1`;
-    window.open(url, '_blank');
-  };
-
-  const handleSettingsSave = (newSettings: Settings) => {
-    setSettings(newSettings);
-  };
-
-  const formatVolume = (volume: number) => {
-    if (volume >= 1000000) {
-      return `$${(volume / 1000000).toFixed(1)}M`;
-    } else if (volume >= 1000) {
-      return `$${(volume / 1000).toFixed(1)}K`;
-    }
-    return `$${volume.toFixed(0)}`;
-  };
-
-  const getAlertStatusBadge = (alert: Alert) => {
-    if (!alert.is_closed) {
-      return <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">В процессе</span>;
-    }
-
-    if (alert.is_true_signal === true) {
-      return <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Истинный</span>;
-    } else if (alert.is_true_signal === false) {
-      return <span className="px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full">Ложный</span>;
-    }
-
-    return <span className="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded-full">Неизвестно</span>;
-  };
-
-  const getTimeSyncStatus = () => {
-    if (!timeSync) return { color: 'text-gray-500', text: 'Нет данных', icon: '⚪' };
-
-    if (!timeSync.is_synced) {
-      return { color: 'text-yellow-500', text: 'Не синхронизировано', icon: '🟡' };
-    }
-
-    return { color: 'text-green-500', text: 'Синхронизировано', icon: '🟢' };
-  };
-
-  const formatLocalTime = (date: Date) => {
-    return date.toLocaleTimeString('ru-RU', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    });
-  };
-
-  const formatLocalDate = (date: Date) => {
-    return date.toLocaleDateString('ru-RU', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    });
-  };
-
-  const getTimezoneInfo = () => {
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const offset = new Date().getTimezoneOffset();
-    const offsetHours = Math.abs(Math.floor(offset / 60));
-    const offsetMinutes = Math.abs(offset % 60);
-    const offsetSign = offset <= 0 ? '+' : '-';
-
-    return {
-      timezone,
-      offsetString: `UTC${offsetSign}${offsetHours.toString().padStart(2, '0')}:${offsetMinutes.toString().padStart(2, '0')}`
-    };
-  };
-
-  const getConnectionStatusIcon = () => {
-    switch (connectionStatus) {
-      case 'connected':
-        return <Wifi className="w-5 h-5 text-green-500" />;
-      case 'connecting':
-        return <RefreshCw className="w-5 h-5 text-yellow-500 animate-spin" />;
-      case 'disconnected':
-        return <WifiOff className="w-5 h-5 text-red-500" />;
+  const getFilteredAlerts = () => {
+    switch (activeTab) {
+      case 'volume':
+        return alerts.filter(alert => alert.alert_type === 'volume_spike');
+      case 'consecutive':
+        return alerts.filter(alert => alert.alert_type === 'consecutive_long');
+      case 'priority':
+        return alerts.filter(alert => alert.alert_type === 'priority');
+      case 'smart_money':
+        return smartMoneyAlerts;
       default:
-        return <WifiOff className="w-5 h-5 text-gray-500" />;
+        return [];
     }
   };
 
-  const getConnectionStatusText = () => {
-    switch (connectionStatus) {
-      case 'connected':
-        return `Подключено (${connectionInfo.subscribedCount}/${watchlist.length})`;
-      case 'connecting':
-        return 'Подключение...';
-      case 'disconnected':
-        return reconnectAttempts > 0 ? `Переподключение (${reconnectAttempts})` : 'Отключено';
+  const getTabCount = (tab: string) => {
+    switch (tab) {
+      case 'volume':
+        return stats?.volume_alerts || 0;
+      case 'consecutive':
+        return stats?.consecutive_alerts || 0;
+      case 'priority':
+        return stats?.priority_alerts || 0;
+      case 'smart_money':
+        return stats?.smart_money_alerts || 0;
+      case 'paper_trades':
+        return stats?.paper_trades_count || 0;
+      case 'real_trades':
+        return stats?.real_trades_count || 0;
       default:
-        return 'Неизвестно';
+        return 0;
     }
   };
 
-  const getDataActivityIcon = () => {
-    switch (dataActivity) {
-      case 'active':
-        return <Zap className="w-4 h-4 text-green-500 animate-pulse" />;
-      case 'error':
-        return <Activity className="w-4 h-4 text-red-500" />;
-      case 'idle':
-      default:
-        return <Activity className="w-4 h-4 text-gray-400" />;
-    }
-  };
-
-  const getDataActivityText = () => {
-    switch (dataActivity) {
-      case 'active':
-        return 'Получение данных';
-      case 'error':
-        return 'Ошибка данных';
-      case 'idle':
-      default:
-        return 'Ожидание';
-    }
-  };
-
-  const renderAlertCard = (alert: Alert) => (
-    <div
-      key={alert.id}
-      className="bg-white rounded-lg shadow-md border border-gray-200 p-4 hover:shadow-lg transition-shadow cursor-pointer w-full"
-      onClick={() => setSelectedAlert(alert)}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center space-x-3">
-          <span className="font-bold text-lg text-gray-900">{alert.symbol}</span>
-          {alert.has_imbalance && (
-            <span className="text-orange-500 text-sm">⚠️ Имбаланс</span>
-          )}
-          {getAlertStatusBadge(alert)}
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              openTradingView(alert.symbol);
-            }}
-            className="text-blue-600 hover:text-blue-800 p-1"
-            title="Открыть в TradingView"
-          >
-            <ExternalLink className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <span className="text-gray-600">Цена:</span>
-          <div className="font-mono text-gray-900">${alert.price.toFixed(8)}</div>
-        </div>
-
-        {alert.volume_ratio && (
-          <div>
-            <span className="text-gray-600">Превышение:</span>
-            <div className="font-semibold text-orange-600">{alert.volume_ratio}x</div>
-          </div>
-        )}
-
-        {alert.current_volume_usdt && (
-          <div>
-            <span className="text-gray-600">Объем:</span>
-            <div className="text-gray-900">{formatVolume(alert.current_volume_usdt)}</div>
-          </div>
-        )}
-
-        {alert.consecutive_count && (
-          <div>
-            <span className="text-gray-600">LONG свечей:</span>
-            <div className="font-semibold text-green-600">{alert.consecutive_count}</div>
-          </div>
-        )}
-      </div>
-
-      <div className="mt-3 pt-3 border-t border-gray-200">
-        <div className="text-xs text-gray-500">
-          <div>Время закрытия: {formatTime(alert.close_timestamp || alert.timestamp, 'local')}</div>
-          {alert.preliminary_alert && (
-            <div>Предварительный: {formatTime(alert.preliminary_alert.timestamp, 'local')}</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderSmartMoneyCard = (alert: SmartMoneyAlert) => (
-    <div
-      key={alert.id}
-      className="bg-white rounded-lg shadow-md border border-gray-200 p-4 hover:shadow-lg transition-shadow cursor-pointer w-full"
-      onClick={() => setSelectedSmartMoneyAlert(alert)}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center space-x-3">
-          <span className="font-bold text-lg text-gray-900">{alert.symbol}</span>
-          <span className={`px-2 py-1 text-xs rounded-full ${
-            alert.direction === 'bullish' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-          }`}>
-            {alert.direction === 'bullish' ? 'Бычий' : 'Медвежий'}
-          </span>
-        </div>
-
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            openTradingView(alert.symbol);
-          }}
-          className="text-blue-600 hover:text-blue-800 p-1"
-          title="Открыть в TradingView"
-        >
-          <ExternalLink className="w-4 h-4" />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <span className="text-gray-600">Тип:</span>
-          <div className="font-semibold text-gray-900">
-            {alert.type === 'fair_value_gap' && 'Fair Value Gap'}
-            {alert.type === 'order_block' && 'Order Block'}
-            {alert.type === 'breaker_block' && 'Breaker Block'}
-          </div>
-        </div>
-
-        <div>
-          <span className="text-gray-600">Сила:</span>
-          <div className="font-semibold text-purple-600">{alert.strength.toFixed(2)}%</div>
-        </div>
-
-        <div>
-          <span className="text-gray-600">Цена:</span>
-          <div className="font-mono text-gray-900">${alert.price.toFixed(8)}</div>
-        </div>
-
-        <div>
-          <span className="text-gray-600">Время:</span>
-          <div className="text-gray-900">{formatTime(alert.timestamp, 'local')}</div>
-        </div>
-      </div>
-
-      {alert.top && alert.bottom && (
-        <div className="mt-3 pt-3 border-t border-gray-200">
-          <div className="grid grid-cols-2 gap-4  text-xs text-gray-500">
-            <div>Верх: ${alert.top.toFixed(6)}</div>
-            <div>Низ: ${alert.bottom.toFixed(6)}</div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderWatchlistCard = (item: WatchlistItem) => (
-    <div key={item.id} className="bg-white rounded-lg shadow-md border border-gray-200 p-4 hover:shadow-lg transition-shadow w-full">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-3">
-          <div className={`w-3 h-3 rounded-full ${item.is_active ? 'bg-green-500' : 'bg-red-500'}`}></div>
-          <span className="font-bold text-lg text-gray-900">{item.symbol}</span>
-          {item.is_favorite && (
-            <span className="text-yellow-500">
-              <Star className="w-4 h-4 fill-yellow-500" />
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleFavorite(item.symbol, item.is_favorite);
-            }}
-            className={`p-1 rounded-full ${
-              item.is_favorite
-                ? 'text-yellow-500 hover:text-yellow-600'
-                : 'text-gray-400 hover:text-yellow-500'
-            }`}
-            title={item.is_favorite ? "Удалить из избранного" : "Добавить в избранное"}
-          >
-            {item.is_favorite ? (
-              <Heart className="w-5 h-5 fill-yellow-500" />
-            ) : (
-              <Heart className="w-5 h-5" />
-            )}
-          </button>
-
-          <button
-            onClick={() => openTradingView(item.symbol)}
-            className="text-blue-600 hover:text-blue-800 p-1"
-            title="Открыть в TradingView"
-          >
-            <ExternalLink className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {item.price_drop_percentage && (
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-gray-600">Падение цены:</span>
-            <div className="font-semibold text-red-600">{item.price_drop_percentage.toFixed(2)}%</div>
-          </div>
-
-          {item.current_price && (
-            <div>
-              <span className="text-gray-600">Текущая цена:</span>
-              <div className="font-mono text-gray-900">${item.current_price.toFixed(8)}</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {item.notes && (
-        <div className="mt-2 text-sm text-gray-600 bg-gray-50 p-2 rounded">
-          {item.notes}
-        </div>
-      )}
-
-      <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500">
-        Обновлено: {formatTime(item.updated_at, 'local')}
-      </div>
-    </div>
-  );
-
-  const renderFavoriteCard = (item: WatchlistItem) => (
-    <div
-      key={item.id}
-      className="bg-white rounded-lg shadow-md border-l-4 p-4 hover:shadow-lg transition-shadow w-full"
-      style={{ borderLeftColor: item.color || '#FFD700' }}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-3">
-          <div className={`w-3 h-3 rounded-full ${item.is_active ? 'bg-green-500' : 'bg-red-500'}`}></div>
-          <span className="font-bold text-lg text-gray-900">{item.symbol}</span>
-          <span className="text-yellow-500">
-            <Star className="w-4 h-4 fill-yellow-500" />
-          </span>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleFavorite(item.symbol, true);
-            }}
-            className="text-yellow-500 hover:text-yellow-600 p-1"
-            title="Удалить из избранного"
-          >
-            <HeartOff className="w-5 h-5" />
-          </button>
-
-          <button
-            onClick={() => openTradingView(item.symbol)}
-            className="text-blue-600 hover:text-blue-800 p-1"
-            title="Открыть в TradingView"
-          >
-            <ExternalLink className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        {item.price_drop_percentage && (
-          <div>
-            <span className="text-gray-600">Падение цены:</span>
-            <div className="font-semibold text-red-600">{item.price_drop_percentage.toFixed(2)}%</div>
-          </div>
-        )}
-
-        {item.current_price && (
-          <div>
-            <span className="text-gray-600">Текущая цена:</span>
-            <div className="font-mono text-gray-900">${item.current_price.toFixed(8)}</div>
-          </div>
-        )}
-      </div>
-
-      {item.notes && (
-        <div className="mt-2 text-sm text-gray-600 bg-gray-50 p-2 rounded">
-          {item.notes}
-        </div>
-      )}
-
-      <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500 flex justify-between">
-        <span>Добавлено: {formatTime(item.favorite_added_at || item.created_at, 'local')}</span>
-        <span>Обновлено: {formatTime(item.updated_at, 'local')}</span>
-      </div>
-    </div>
-  );
-
-  if (loading) {
+  if (loading && !stats) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">Загрузка данных...</p>
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 flex items-center justify-center">
+        <div className="text-center text-white">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-white mx-auto mb-4"></div>
+          <h2 className="text-2xl font-semibold mb-2">Загрузка системы...</h2>
+          <p className="text-blue-200">Подключение к серверу анализа объемов</p>
         </div>
       </div>
     );
   }
 
-  const timeSyncStatus = getTimeSyncStatus();
-  const timezoneInfo = getTimezoneInfo();
+  if (error && !stats) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-900 via-red-800 to-red-700 flex items-center justify-center">
+        <div className="text-center text-white max-w-md">
+          <AlertTriangle className="w-16 h-16 mx-auto mb-4" />
+          <h2 className="text-2xl font-semibold mb-2">Ошибка подключения</h2>
+          <p className="text-red-200 mb-6">{error}</p>
+          <button
+            onClick={loadInitialData}
+            className="bg-white text-red-800 px-6 py-3 rounded-lg hover:bg-red-50 transition-colors"
+          >
+            Попробовать снова
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <TimeZoneProvider>
-      <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <header className="bg-white shadow-sm border-b border-gray-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center space-x-4">
-                <h1 className="text-xl font-bold text-gray-900">Анализатор Объемов</h1>
-                <div className="flex items-center space-x-3">
-                  {getConnectionStatusIcon()}
-                  <span className="text-sm text-gray-600">
-                    {getConnectionStatusText()}
-                  </span>
-                  {/* Индикатор активности данных */}
-                  <div className="flex items-center space-x-1">
-                    {getDataActivityIcon()}
-                    <span className="text-xs text-gray-500">
-                      {getDataActivityText()}
-                    </span>
-                  </div>
-                  {lastDataUpdate && (
-                    <span className="text-xs text-gray-400">
-                      • {formatLocalTime(lastDataUpdate)}
-                    </span>
-                  )}
-                  {connectionInfo.subscribedCount > 0 && (
-                    <span className="text-xs text-gray-400">
-                      • Подписано: {connectionInfo.subscribedCount}
-                    </span>
-                  )}
-                </div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900">
+      {/* Header */}
+      <header className="bg-white/10 backdrop-blur-md border-b border-white/20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            {/* Logo and Title */}
+            <div className="flex items-center space-x-4">
+              <div className="bg-gradient-to-r from-yellow-400 to-orange-500 p-2 rounded-lg">
+                <BarChart3 className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-white">CryptoScan v2</h1>
+                <p className="text-sm text-blue-200">Анализатор объемов Bybit</p>
+              </div>
+            </div>
+
+            {/* Status and Controls */}
+            <div className="flex items-center space-x-4">
+              {/* Connection Status */}
+              <div className="flex items-center space-x-2">
+                {wsConnected ? (
+                  <Wifi className="w-4 h-4 text-green-400" />
+                ) : (
+                  <WifiOff className="w-4 h-4 text-red-400" />
+                )}
+                <span className="text-sm text-white">
+                  {wsConnectionStatus === 'connected' ? 'Онлайн' : 
+                   wsConnectionStatus === 'connecting' ? 'Подключение...' : 'Офлайн'}
+                </span>
               </div>
 
-              <div className="flex items-center space-x-6">
-                {/* Динамические часы в локальном часовом поясе */}
-                <div className="flex items-center space-x-3 bg-gray-100 rounded-lg px-4 py-2">
-                  <Clock className="w-5 h-5 text-gray-600" />
-                  <div className="text-center">
-                    <div className="text-lg font-mono font-bold text-gray-900">
-                      {formatLocalTime(currentTime)}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {formatLocalDate(currentTime)}
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-500 text-center">
-                    <div className={timeSyncStatus.color}>
-                      {timeSyncStatus.icon} {timezoneInfo.offsetString}
-                    </div>
-                    <div className="text-xs">
-                      {timezoneInfo.timezone.split('/').pop()}
-                    </div>
-                    <div className="text-xs">
-                      Синх: {timeSyncStatus.text}
-                    </div>
-                  </div>
+              {/* Time Sync Status */}
+              {timeSync && (
+                <div className="flex items-center space-x-2">
+                  <Clock className="w-4 h-4 text-blue-400" />
+                  <span className="text-sm text-white">
+                    {timeSync.is_synced ? '🟢 Синхронизировано' : '🔴 Не синхронизировано'}
+                  </span>
                 </div>
+              )}
+
+              <TimeZoneToggle />
+
+              {/* Action Buttons */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setShowStreamData(true)}
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg transition-colors flex items-center space-x-2"
+                >
+                  <Activity className="w-4 h-4" />
+                  <span>Поток</span>
+                </button>
+
+                <button
+                  onClick={() => setShowFavorites(true)}
+                  className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-2 rounded-lg transition-colors flex items-center space-x-2"
+                >
+                  <Heart className="w-4 h-4" />
+                  <span>Избранное</span>
+                </button>
+
+                <button
+                  onClick={() => setShowWatchlist(true)}
+                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg transition-colors flex items-center space-x-2"
+                >
+                  <List className="w-4 h-4" />
+                  <span>Watchlist</span>
+                </button>
 
                 <button
                   onClick={() => setShowSettings(true)}
-                  className="text-gray-600 hover:text-gray-900 p-2 rounded-lg hover:bg-gray-100 transition-colors"
-                  title="Настройки"
+                  className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-lg transition-colors flex items-center space-x-2"
                 >
-                  <Settings className="w-5 h-5" />
+                  <Settings className="w-4 h-4" />
+                  <span>Настройки</span>
+                </button>
+
+                <button
+                  onClick={loadInitialData}
+                  disabled={loading}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-3 py-2 rounded-lg transition-colors flex items-center space-x-2"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  <span>Обновить</span>
                 </button>
               </div>
             </div>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* Navigation Tabs */}
-        <nav className="bg-white border-b border-gray-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex space-x-8">
-              {[
-                { id: 'volume', label: 'Алерты по объему', icon: TrendingUp, count: volumeAlerts.length },
-                { id: 'consecutive', label: 'LONG последовательности', icon: BarChart3, count: consecutiveAlerts.length },
-                { id: 'priority', label: 'Приоритетные', icon: Star, count: priorityAlerts.length },
-                { id: 'smart_money', label: 'Smart Money', icon: Brain, count: smartMoneyAlerts.length },
-                { id: 'favorites', label: 'Избранное', icon: Heart, count: favorites.length },
-                { id: 'watchlist', label: 'Торговые пары', icon: List, count: watchlist.length },
-                { id: 'stream', label: 'Потоковые данные', icon: Wifi, count: streamData.length }
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex items-center space-x-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                    activeTab === tab.id
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  <tab.icon className="w-4 h-4" />
-                  <span>{tab.label}</span>
-                  {tab.count > 0 && (
-                    <span className="bg-gray-100 text-gray-900 py-0.5 px-2 rounded-full text-xs">
-                      {tab.count}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-        </nav>
-
-        {/* Main Content */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Volume Alerts */}
-          {activeTab === 'volume' && (
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Алерты по объему</h2>
-                <button
-                  onClick={() => clearAlerts('volume_spike')}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Очистить
-                </button>
+      {/* Stats Bar */}
+      {stats && (
+        <div className="bg-white/5 backdrop-blur-sm border-b border-white/10">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-white">{stats.pairs_count}</div>
+                <div className="text-sm text-blue-200">Торговых пар</div>
               </div>
-
-              <div className="space-y-4">
-                {volumeAlerts.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <TrendingUp className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p>Нет алертов по объему</p>
-                  </div>
-                ) : (
-                  volumeAlerts.map(renderAlertCard)
-                )}
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-400">{stats.volume_alerts}</div>
+                <div className="text-sm text-blue-200">Объем</div>
               </div>
-            </div>
-          )}
-
-          {/* Consecutive Alerts */}
-          {activeTab === 'consecutive' && (
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">LONG последовательности</h2>
-                <button
-                  onClick={() => clearAlerts('consecutive_long')}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Очистить
-                </button>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-yellow-400">{stats.consecutive_alerts}</div>
+                <div className="text-sm text-blue-200">Последовательные</div>
               </div>
-
-              <div className="space-y-4">
-                {consecutiveAlerts.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <BarChart3 className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p>Нет алертов по последовательностям</p>
-                  </div>
-                ) : (
-                  consecutiveAlerts.map(renderAlertCard)
-                )}
+              <div className="text-center">
+                <div className="text-2xl font-bold text-red-400">{stats.priority_alerts}</div>
+                <div className="text-sm text-blue-200">Приоритетные</div>
               </div>
-            </div>
-          )}
-
-          {/* Priority Alerts */}
-          {activeTab === 'priority' && (
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Приоритетные алерты</h2>
-                <button
-                  onClick={() => clearAlerts('priority')}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Очистить
-                </button>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-purple-400">{stats.smart_money_alerts}</div>
+                <div className="text-sm text-blue-200">Smart Money</div>
               </div>
-
-              <div className="space-y-4">
-                {priorityAlerts.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <Star className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p>Нет приоритетных алертов</p>
-                  </div>
-                ) : (
-                  priorityAlerts.map(renderAlertCard)
-                )}
+              <div className="text-center">
+                <div className="text-2xl font-bold text-blue-400">{stats.paper_trades_count}</div>
+                <div className="text-sm text-blue-200">Бумажные</div>
               </div>
-            </div>
-          )}
-
-          {/* Smart Money Alerts */}
-          {activeTab === 'smart_money' && (
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Smart Money Concepts</h2>
-                <button
-                  onClick={() => setSmartMoneyAlerts([])}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Очистить
-                </button>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-orange-400">{stats.real_trades_count}</div>
+                <div className="text-sm text-blue-200">Реальные</div>
               </div>
-
-              <div className="space-y-4">
-                {smartMoneyAlerts.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <Brain className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p>Нет сигналов Smart Money</p>
-                  </div>
-                ) : (
-                  smartMoneyAlerts.map(renderSmartMoneyCard)
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Favorites */}
-          {activeTab === 'favorites' && (
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Избранные торговые пары</h2>
-                <button
-                  onClick={() => setShowFavoritesModal(true)}
-                  className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Управление избранным
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {favorites.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <Heart className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p>Нет избранных торговых пар</p>
-                    <p className="mt-2 text-sm">Добавьте пары в избранное, нажав на иконку сердечка в списке торговых пар</p>
-                  </div>
-                ) : (
-                  favorites.map(renderFavoriteCard)
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Watchlist */}
-          {activeTab === 'watchlist' && (
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Список торговых пар</h2>
-                <button
-                  onClick={() => setShowWatchlistModal(true)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Управление
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {watchlist.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <List className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p>Нет торговых пар в списке</p>
-                  </div>
-                ) : (
-                  watchlist.map(renderWatchlistCard)
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Stream Data */}
-          {activeTab === 'stream' && (
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Потоковые данные</h2>
-                <div className="flex items-center space-x-4">
-                  <span className="text-sm text-gray-600">
-                    Обновлений: {streamData.length} / Пар в watchlist: {watchlist.length} / Подписано: {connectionInfo.subscribedCount}
-                  </span>
-                  <button
-                    onClick={() => connectWebSocket()}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                    disabled={connectionStatus === 'connecting'}
-                  >
-                    {connectionStatus === 'connecting' ? 'Подключение...' : 'Переподключить'}
-                  </button>
+              <div className="text-center">
+                <div className={`text-2xl font-bold ${(stats.paper_trades_pnl + stats.real_trades_pnl) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {((stats.paper_trades_pnl + stats.real_trades_pnl) >= 0 ? '+' : '')}${(stats.paper_trades_pnl + stats.real_trades_pnl).toFixed(2)}
                 </div>
-              </div>
-
-              <div className="space-y-4">
-                {streamData.slice(0, 200).map((item, index) => (
-                  <div key={`${item.symbol}-${index}`} className="bg-white rounded-lg shadow-md border border-gray-200 p-4 w-full">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-4">
-                        <div className={`w-4 h-4 rounded-full ${
-                          item.is_long ? 'bg-green-500' : 'bg-red-500'
-                        }`}></div>
-
-                        <div>
-                          <span className="font-semibold text-gray-900 text-lg">{item.symbol}</span>
-                          <div className="flex items-center space-x-2 text-sm">
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${
-                              item.is_long ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                            }`}>
-                              {item.is_long ? 'LONG' : 'SHORT'}
-                            </span>
-                            {item.is_closed && (
-                              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">Закрыта</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-xl font-bold text-gray-900">
-                          ${item.price.toFixed(8)}
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          Vol: {formatVolume(item.volume_usdt)}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center space-x-2">
-                        <div className="text-right text-sm text-gray-500">
-                          <div>{formatTime(item.timestamp, 'local', { includeDate: false, includeSeconds: true })}</div>
-                          <div className="text-xs">
-                            {formatVolume(item.volume)} {item.symbol.replace('USDT', '')}
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => openTradingView(item.symbol)}
-                          className="text-blue-600 hover:text-blue-800 p-1"
-                          title="Открыть в TradingView"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                <div className="text-sm text-blue-200">Общий PnL</div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Tabs */}
+        <div className="mb-8">
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setActiveTab('volume')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                activeTab === 'volume'
+                  ? 'bg-green-600 text-white'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+            >
+              <TrendingUp className="w-4 h-4" />
+              <span>Превышение объема</span>
+              <span className="bg-white/20 px-2 py-1 rounded-full text-xs">
+                {getTabCount('volume')}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('consecutive')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                activeTab === 'consecutive'
+                  ? 'bg-yellow-600 text-white'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+            >
+              <Target className="w-4 h-4" />
+              <span>Последовательные LONG</span>
+              <span className="bg-white/20 px-2 py-1 rounded-full text-xs">
+                {getTabCount('consecutive')}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('priority')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                activeTab === 'priority'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+            >
+              <AlertTriangle className="w-4 h-4" />
+              <span>Приоритетные</span>
+              <span className="bg-white/20 px-2 py-1 rounded-full text-xs">
+                {getTabCount('priority')}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('smart_money')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                activeTab === 'smart_money'
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+            >
+              <Zap className="w-4 h-4" />
+              <span>Smart Money</span>
+              <span className="bg-white/20 px-2 py-1 rounded-full text-xs">
+                {getTabCount('smart_money')}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('paper_trades')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                activeTab === 'paper_trades'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+            >
+              <Calculator className="w-4 h-4" />
+              <span>Бумажные сделки</span>
+              <span className="bg-white/20 px-2 py-1 rounded-full text-xs">
+                {getTabCount('paper_trades')}
+              </span>
+              {stats && stats.paper_trades_pnl !== 0 && (
+                <span className={`text-xs px-2 py-1 rounded ${
+                  stats.paper_trades_pnl >= 0 ? 'bg-green-500' : 'bg-red-500'
+                }`}>
+                  {stats.paper_trades_pnl >= 0 ? '+' : ''}${stats.paper_trades_pnl.toFixed(2)}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('real_trades')}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                activeTab === 'real_trades'
+                  ? 'bg-orange-600 text-white'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+            >
+              <DollarSign className="w-4 h-4" />
+              <span>Реальные сделки</span>
+              <span className="bg-white/20 px-2 py-1 rounded-full text-xs">
+                {getTabCount('real_trades')}
+              </span>
+              {stats && stats.real_trades_pnl !== 0 && (
+                <span className={`text-xs px-2 py-1 rounded ${
+                  stats.real_trades_pnl >= 0 ? 'bg-green-500' : 'bg-red-500'
+                }`}>
+                  {stats.real_trades_pnl >= 0 ? '+' : ''}${stats.real_trades_pnl.toFixed(2)}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="bg-white/10 backdrop-blur-md rounded-xl border border-white/20 p-6">
+          {activeTab === 'paper_trades' ? (
+            <div className="text-center py-12">
+              <Calculator className="w-16 h-16 text-blue-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-white mb-2">Бумажные сделки</h3>
+              <p className="text-blue-200 mb-6">Управление виртуальными сделками без риска</p>
+              <button
+                onClick={() => setShowPaperTrades(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition-colors"
+              >
+                Открыть панель бумажных сделок
+              </button>
+            </div>
+          ) : activeTab === 'real_trades' ? (
+            <div className="text-center py-12">
+              <DollarSign className="w-16 h-16 text-orange-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-white mb-2">Реальные сделки</h3>
+              <p className="text-blue-200 mb-6">Управление реальными сделками через API Bybit</p>
+              <button
+                onClick={() => setShowRealTrades(true)}
+                className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3 rounded-lg transition-colors"
+              >
+                Открыть панель реальных сделок
+              </button>
+            </div>
+          ) : (
+            <AlertsList
+              alerts={getFilteredAlerts()}
+              alertType={activeTab}
+              onAlertClick={(alert) => {
+                if (activeTab === 'smart_money') {
+                  setSelectedSmartMoneyAlert(alert as SmartMoneyAlert);
+                } else {
+                  setSelectedAlert(alert as Alert);
+                }
+              }}
+              favorites={favorites}
+              onToggleFavorite={handleToggleFavorite}
+            />
           )}
-        </main>
+        </div>
 
-        {/* Modals */}
-        {selectedAlert && (
-          <ChartSelector
-            alert={selectedAlert}
-            onClose={() => setSelectedAlert(null)}
-          />
+        {/* Last Update */}
+        {stats?.last_update && (
+          <div className="mt-6 text-center text-blue-200 text-sm">
+            Последнее обновление: {formatTime(stats.last_update, timeZone)}
+          </div>
         )}
+      </main>
 
-        {selectedSmartMoneyAlert && (
-          <ChartSelector
-            alert={{
-              id: selectedSmartMoneyAlert.id,
-              symbol: selectedSmartMoneyAlert.symbol,
-              alert_type: 'smart_money',
-              price: selectedSmartMoneyAlert.price,
-              timestamp: selectedSmartMoneyAlert.timestamp,
-              close_timestamp: selectedSmartMoneyAlert.timestamp,
-              has_imbalance: true,
-              imbalance_data: {
-                type: selectedSmartMoneyAlert.type,
-                direction: selectedSmartMoneyAlert.direction,
-                strength: selectedSmartMoneyAlert.strength,
-                top: selectedSmartMoneyAlert.top,
-                bottom: selectedSmartMoneyAlert.bottom
-              },
-              is_closed: true,
-              message: `Smart Money: ${selectedSmartMoneyAlert.type}`
-            }}
-            onClose={() => setSelectedSmartMoneyAlert(null)}
-          />
-        )}
+      {/* Modals */}
+      {showWatchlist && (
+        <WatchlistModal
+          watchlist={watchlist}
+          onClose={() => setShowWatchlist(false)}
+          onUpdate={loadInitialData}
+          onToggleFavorite={handleToggleFavorite}
+        />
+      )}
 
-        {showWatchlistModal && (
-          <WatchlistModal
-            watchlist={watchlist}
-            onClose={() => setShowWatchlistModal(false)}
-            onUpdate={loadWatchlist}
-            onToggleFavorite={toggleFavorite}
-          />
-        )}
+      {showFavorites && (
+        <FavoritesModal
+          favorites={favorites}
+          onClose={() => setShowFavorites(false)}
+          onUpdate={loadInitialData}
+        />
+      )}
 
-        {showFavoritesModal && (
-          <FavoritesModal
-            favorites={favorites}
-            onClose={() => setShowFavoritesModal(false)}
-            onUpdate={loadFavorites}
-          />
-        )}
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          onUpdate={loadInitialData}
+        />
+      )}
 
-        {showStreamModal && (
-          <StreamDataModal
-            streamData={streamData}
-            connectionStatus={connectionStatus}
-            onClose={() => setShowStreamModal(false)}
-          />
-        )}
+      {showStreamData && (
+        <StreamDataModal
+          streamData={streamData}
+          connectionStatus={wsConnectionStatus}
+          onClose={() => setShowStreamData(false)}
+        />
+      )}
 
-        {showSettings && (
-          <SettingsModal
-            settings={settings}
-            onClose={() => setShowSettings(false)}
-            onSave={handleSettingsSave}
-          />
-        )}
-      </div>
-    </TimeZoneProvider>
+      {showPaperTrades && (
+        <PaperTradesModal
+          onClose={() => setShowPaperTrades(false)}
+          onUpdate={loadInitialData}
+        />
+      )}
+
+      {showRealTrades && (
+        <RealTradesModal
+          onClose={() => setShowRealTrades(false)}
+          onUpdate={loadInitialData}
+        />
+      )}
+
+      {selectedAlert && (
+        <ChartSelector
+          alert={selectedAlert}
+          onClose={() => setSelectedAlert(null)}
+        />
+      )}
+
+      {selectedSmartMoneyAlert && (
+        <SmartMoneyChartModal
+          alert={selectedSmartMoneyAlert}
+          onClose={() => setSelectedSmartMoneyAlert(null)}
+        />
+      )}
+    </div>
   );
 };
 
